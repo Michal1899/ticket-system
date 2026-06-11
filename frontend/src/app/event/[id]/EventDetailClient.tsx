@@ -9,10 +9,39 @@ import styles from './event.module.css';
 import { clsx } from 'clsx';
 import { EventItem, MyTicket, ReservationData } from '../../types';
 
+function formatCountdown(totalSeconds: number) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+}
+
 export default function EventDetailClient({ initialEvent }: { initialEvent: EventItem }) {
   const [availableTickets, setAvailableTickets] = useState(initialEvent.available_tickets);
   const [errorMsg, setErrorMsg] = useState('');
   const [reservation, setReservation] = useState<ReservationData | null>(null);
+  const [remainingSeconds, setRemainingSeconds] = useState<number | null>(null);
+
+  // Countdown for the 5-minute payment window. The interval ticks down the
+  // remaining time and, once it hits zero, releases the reservation locally
+  // (the backend/cron will have already returned the ticket to the pool).
+  useEffect(() => {
+    if (!reservation || reservation.paid) return;
+
+    const expiresAt = new Date(reservation.expiresAt).getTime();
+
+    const interval = setInterval(() => {
+      const secondsLeft = Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000));
+      setRemainingSeconds(secondsLeft);
+      if (secondsLeft <= 0) {
+        clearInterval(interval);
+        setReservation(null);
+        setRemainingSeconds(null);
+        setErrorMsg('Czas na płatność minął. Bilet wrócił do puli – możesz zarezerwować ponownie.');
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [reservation]);
 
   useEffect(() => {
     const socket: Socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000');
@@ -45,6 +74,7 @@ export default function EventDetailClient({ initialEvent }: { initialEvent: Even
     },
     onSuccess: (data) => {
       setReservation(data);
+      setRemainingSeconds(Math.max(0, Math.ceil((new Date(data.expiresAt).getTime() - Date.now()) / 1000)));
     },
     onError: (error: Error) => {
       setErrorMsg(error.message);
@@ -123,7 +153,12 @@ export default function EventDetailClient({ initialEvent }: { initialEvent: Even
             <div className={styles.checkoutBox}>
               <h3 className={styles.successTitle}>Bilet zarezerwowany!</h3>
               <p>Masz 5 minut na dokonanie płatności.</p>
-              <button 
+              {remainingSeconds !== null && (
+                <div className={clsx(styles.countdown, remainingSeconds <= 60 && styles.countdownWarning)}>
+                  Pozostały czas: <strong>{formatCountdown(remainingSeconds)}</strong>
+                </div>
+              )}
+              <button
                 className={styles.payButton}
                 onClick={() => payMutation.mutate()}
                 disabled={payMutation.isPending}
