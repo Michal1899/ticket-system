@@ -101,7 +101,7 @@ router.post('/pay', async (req: Request, res: Response) => {
     await client.query('BEGIN');
 
     const { rows: reservationRows } = await client.query(
-      'SELECT status, event_id FROM reservations WHERE id = $1 FOR UPDATE',
+      'SELECT status, event_id, expires_at FROM reservations WHERE id = $1 FOR UPDATE',
       [reservationId]
     );
 
@@ -110,7 +110,7 @@ router.post('/pay', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Reservation not found' });
     }
 
-    const { status, event_id } = reservationRows[0];
+    const { status, event_id, expires_at } = reservationRows[0];
 
     if (status === 'paid') {
       await client.query('ROLLBACK');
@@ -119,6 +119,24 @@ router.post('/pay', async (req: Request, res: Response) => {
 
     if (status === 'timeout') {
       await client.query('ROLLBACK');
+      return res.status(400).json({ error: 'Reservation expired' });
+    }
+
+    if (new Date(expires_at) < new Date()) {
+      // Reservation expired but the cron hasn't released it yet - release it now.
+      await client.query(`UPDATE reservations SET status = 'timeout' WHERE id = $1`, [reservationId]);
+
+      const { rows: updatedEvent } = await client.query(
+        `UPDATE events SET available_tickets = available_tickets + 1 WHERE id = $1 RETURNING available_tickets`,
+        [event_id]
+      );
+
+      await client.query('COMMIT');
+
+      if (updatedEvent.length > 0) {
+        req.app.get('io').emit('ticket_update', { eventId: event_id, availableTickets: updatedEvent[0].available_tickets });
+      }
+
       return res.status(400).json({ error: 'Reservation expired' });
     }
 

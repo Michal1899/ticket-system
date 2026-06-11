@@ -1,18 +1,18 @@
 "use client";
 
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation } from '@tanstack/react-query';
 import { io, Socket } from 'socket.io-client';
 import { format } from 'date-fns';
 import Link from 'next/link';
 import styles from './event.module.css';
 import { clsx } from 'clsx';
+import { EventItem, MyTicket, ReservationData } from '../../types';
 
-export default function EventDetailClient({ initialEvent }: { initialEvent: any }) {
+export default function EventDetailClient({ initialEvent }: { initialEvent: EventItem }) {
   const [availableTickets, setAvailableTickets] = useState(initialEvent.available_tickets);
   const [errorMsg, setErrorMsg] = useState('');
-  const [reservation, setReservation] = useState<any>(null);
-  const queryClient = useQueryClient();
+  const [reservation, setReservation] = useState<ReservationData | null>(null);
 
   useEffect(() => {
     const socket: Socket = io(process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000');
@@ -37,22 +37,26 @@ export default function EventDetailClient({ initialEvent }: { initialEvent: any 
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Nie udało się zarezerwować');
-      return data;
+      return data as ReservationData;
     },
     onMutate: async () => {
       setErrorMsg('');
-      setAvailableTickets((prev: number) => Math.max(0, prev - 1));
+      setAvailableTickets((prev: number) => prev - 1);
     },
     onSuccess: (data) => {
       setReservation(data);
     },
     onError: (error: Error) => {
       setErrorMsg(error.message);
+      // Roll back the optimistic decrement - the reservation didn't go through.
+      setAvailableTickets((prev: number) => prev + 1);
     }
   });
 
   const payMutation = useMutation({
     mutationFn: async () => {
+      if (!reservation) throw new Error('Brak aktywnej rezerwacji');
+
       const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000'}/api/pay`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -63,9 +67,11 @@ export default function EventDetailClient({ initialEvent }: { initialEvent: any 
       return data;
     },
     onSuccess: () => {
-      setReservation((prev: any) => ({ ...prev, paid: true }));
-      
-      const myTickets = JSON.parse(localStorage.getItem('my_tickets') || '[]');
+      setReservation((prev) => prev ? { ...prev, paid: true } : prev);
+
+      if (!reservation) return;
+
+      const myTickets: MyTicket[] = JSON.parse(localStorage.getItem('my_tickets') || '[]');
       myTickets.push({
         reservationId: reservation.reservationId,
         eventId: initialEvent.id,
@@ -77,6 +83,10 @@ export default function EventDetailClient({ initialEvent }: { initialEvent: any 
     },
     onError: (error: Error) => {
       setErrorMsg(error.message);
+      // The reservation can no longer be paid - clear it so the user can try reserving again.
+      if (error.message === 'Reservation expired' || error.message === 'Already paid') {
+        setReservation(null);
+      }
     }
   });
 

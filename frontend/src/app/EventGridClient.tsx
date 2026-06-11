@@ -5,8 +5,9 @@ import Link from 'next/link';
 import { format } from 'date-fns';
 import { io, Socket } from 'socket.io-client';
 import styles from './page.module.css';
+import { EventItem } from './types';
 
-export default function EventGridClient({ initialEvents }: { initialEvents: any[] }) {
+export default function EventGridClient({ initialEvents }: { initialEvents: EventItem[] }) {
   const [events, setEvents] = useState(initialEvents);
 
   useEffect(() => {
@@ -42,7 +43,7 @@ export default function EventGridClient({ initialEvents }: { initialEvents: any[
 
   return (
     <div className={styles.grid}>
-      {events.map((event: any) => (
+      {events.map((event: EventItem) => (
         <Link href={`/event/${event.id}`} key={event.id} className={styles.card}>
           <div className={styles.cardImagePlaceholder}>
             <span>{format(new Date(event.date), "MMM d")}</span>

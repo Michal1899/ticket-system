@@ -1,12 +1,16 @@
 import Link from "next/link";
 import styles from "./page.module.css";
 import EventGridClient from "./EventGridClient";
+import { EventItem } from "./types";
 
-async function getEvents() {
+async function getEvents(): Promise<EventItem[]> {
   const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
   try {
+    // ISR: the page is regenerated in the background at most every 30s. The
+    // client also fetches fresh data and listens for live updates over
+    // websockets, so this only affects the initial server-rendered shell.
     const res = await fetch(`${apiUrl}/api/events`, {
-      cache: 'no-store'
+      next: { revalidate: 30 }
     });
 
     if (!res.ok) {

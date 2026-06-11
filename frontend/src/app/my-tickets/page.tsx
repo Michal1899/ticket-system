@@ -1,17 +1,36 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import { format } from 'date-fns';
 import styles from './my-tickets.module.css';
+import { MyTicket } from '../types';
+
+const EMPTY_TICKETS: MyTicket[] = [];
+
+let cachedRaw: string | null = null;
+let cachedTickets: MyTicket[] = EMPTY_TICKETS;
+
+function getMyTickets(): MyTicket[] {
+  const raw = localStorage.getItem('my_tickets') || '[]';
+  if (raw !== cachedRaw) {
+    cachedRaw = raw;
+    cachedTickets = JSON.parse(raw);
+  }
+  return cachedTickets;
+}
+
+function getServerSnapshot(): MyTicket[] {
+  return EMPTY_TICKETS;
+}
+
+function subscribe(callback: () => void) {
+  window.addEventListener('storage', callback);
+  return () => window.removeEventListener('storage', callback);
+}
 
 export default function MyTicketsPage() {
-  const [tickets, setTickets] = useState<any[]>([]);
-
-  useEffect(() => {
-    const stored = JSON.parse(localStorage.getItem('my_tickets') || '[]');
-    setTickets(stored);
-  }, []);
+  const tickets = useSyncExternalStore(subscribe, getMyTickets, getServerSnapshot);
 
   return (
     <>
